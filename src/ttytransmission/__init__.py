@@ -147,7 +147,7 @@ def main() -> None:
                 break
             
             start = text_section.peek_bits(1)
-            data = text_section.read_bits(9)
+            data = text_section.peek_bits(9)
             byte = int(data[1:].bin, 2)
             
             
@@ -155,12 +155,14 @@ def main() -> None:
                 continue
                 
             if byte not in allowed_printables:
-                text_section.pos -= 8
+                text_section.pos += 1
                 continue
 
             logger.debug(f"{byte} -> {byte.to_bytes()} start: {start}, {data}")
 
             message += byte.to_bytes().decode("latin-1")
+            text_section.pos += 8
+            
 
 
 
