@@ -130,11 +130,12 @@ def main() -> None:
         
         text_section: BitStream = BitStream(stream[text_start+8:text_end])
         
-        statuses_section: ConstBitStream = stream[text_end+8:transmission_end-8]
-        
+        statuses_section: ConstBitStream = stream[text_end+8:transmission_end]
+        logger.debug(statuses_section)
         if len(statuses_section) != 0:
             while statuses_section.pos < len(statuses_section):
                 byte = int(statuses_section.read('bin:8'), 2)
+                logger.debug(f"found byte: {byte} at {statuses_section.pos-8}")
                 statuses += status_table.get(byte, f'UNMAPPED STATUS: {byte}')
 
 
@@ -255,20 +256,23 @@ def main() -> None:
             user_input_type = repeat_ask_for_input('finish / code : ', ['finish','code'])
             if user_input_type == 'finish':
                 break
-            user_input = input(f": ")
-            text_to_write = user_input
-            byte_key = bytes([int(user_input)])
-            control_code = status_table.get(int(user_input), None)
-            if control_code == None:
-                print(f"invalid status code: {user_input}, {byte_key}")
-                continue
-            
-            bit_array.append(f"u8={int(user_input)}")
-            text_to_write = control_code
-            
-            writing_status += text_to_write
-            
-            print(writing_status)
+            try:
+                user_input = input(f": ")
+                text_to_write = user_input
+                byte_key = bytes([int(user_input)])
+                control_code = status_table.get(int(user_input), None)
+                if control_code == None:
+                    print(f"invalid status code: {user_input}, {byte_key}")
+                    continue
+                
+                bit_array.append(f"u8={int(user_input)}")
+                text_to_write = control_code
+                
+                writing_status += text_to_write
+                
+                print(writing_status)
+            except KeyboardInterrupt:
+                print('canceled')
         bit_array.append(f"uint:8={END_OF_TRANSMITION}")
 
         
