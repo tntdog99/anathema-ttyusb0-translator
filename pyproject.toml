@@ -6,9 +6,9 @@ readme = "README.md"
 authors = [
     { name = "tntdog99", email = "epicghast12@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
-    "bitstring==4.4.0",
+    "bitstring",
 ]
 
 [project.scripts]

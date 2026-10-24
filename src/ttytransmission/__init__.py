@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from bitstring import ConstBitStream, BitArray, BitStream
+from bitstring import BitArray, Reader
 import sys
 import logging
 
@@ -52,8 +52,6 @@ allowed_printables.append(0x0D) # \r
 
 
 def main() -> None:
-    print("needs python 3.13 and bitstring==4.4.0")
-
     parser = argparse.ArgumentParser(description='a script to help decode ttyUSB0 [M.A.S.L] messages')
 
     parser.add_argument('-v', '--verbose', help='adds extra logging', action='store_true')
@@ -94,10 +92,9 @@ def main() -> None:
         if input_message[0] in footer_table:
             footer += f'\n{footer_table[input_message[0]]}\n'
         
+        message_bit_data = BitArray(input_message)
         
-        stream = ConstBitStream(input_message)
-        
-        total = len(stream)
+        total = len(message_bit_data)
         
         text_start = 0
         
@@ -128,13 +125,13 @@ def main() -> None:
         
         
         
-        text_section: BitStream = BitStream(stream[text_start+8:text_end])
+        text_section = Reader(message_bit_data[text_start+8:text_end])
         
-        statuses_section: ConstBitStream = stream[text_end+8:transmission_end]
+        statuses_section = Reader(message_bit_data[text_end+8:transmission_end])
         logger.debug(statuses_section)
         if len(statuses_section) != 0:
             while statuses_section.pos < len(statuses_section):
-                byte = int(statuses_section.read('bin:8'), 2)
+                byte = int(statuses_section.read_bits(8).bin, 2)
                 logger.debug(f"found byte: {byte} at {statuses_section.pos-8}")
                 statuses += status_table.get(byte, f'UNMAPPED STATUS: {byte}')
 
@@ -149,9 +146,9 @@ def main() -> None:
                 text_section.pos += (8 - text_section.pos % 8) % 8
                 break
             
-            start = text_section.peek('bin:1')
-            data = text_section.read('bin:9')
-            byte = int(data[1:], 2)
+            start = text_section.peek_bits(1)
+            data = text_section.read_bits(9)
+            byte = int(data[1:].bin, 2)
             
             
             if start == '0':
@@ -237,12 +234,12 @@ def main() -> None:
         text_to_write = user_input
             
         for letter in text_to_write:
-            letter_bits = BitArray(bytes=letter.encode('ascii'))
-            letter_bits.insert([1], 0)
+            letter_bits = BitArray.from_bytes(letter.encode('ascii'))
+            letter_bits.insert(0, [1])
             bit_array.append(letter_bits)
         
         pad = (8 - len(bit_array) % 8) % 8
-        bit_array.append(BitArray(length=pad))
+        bit_array.append(BitArray.from_zeros(pad))
         writing_message += text_to_write
         
         print(writing_message)
