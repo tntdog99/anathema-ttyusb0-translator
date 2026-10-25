@@ -2,11 +2,12 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+import shutil
 
 from bitstring import BitArray, Reader
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.ERROR,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
@@ -52,15 +53,143 @@ allowed_printables.append(0x0A) # \n
 allowed_printables.append(0x0D) # \r
 
 
+def decode_message(input_message: bytes, **kwargs):
+    # the main decoded message
+    message = ''
+
+    # the control code meanings between 0x03 and 0x04
+    statuses = ''
+
+    # any extra info the function genrates, such as canceling
+    footer = ''
+
+    # whether it skipped any bits
+    applied_corrections = False
+
+    if input_message[-1] in footer_table:
+        footer += f'\n{footer_table[input_message[-1]]}\n'
+
+    if input_message[0] in footer_table:
+        footer += f'\n{footer_table[input_message[0]]}\n'
+
+    message_bit_data = BitArray(input_message)
+
+    total = len(message_bit_data)
+
+    text_start = 0
+
+    text_end = total
+
+    transmission_end = total
+
+
+
+    # set text_start to the start of START_OF_MESSAGE
+    pointer = 0
+    while pointer < len(input_message) and input_message[pointer] != START_OF_MESSAGE:
+        pointer += 1
+    text_start = (pointer + 1) * 8 - 8
+
+    # set text_end to the start of END_OF_MESSAGE
+    pointer = len(input_message) - 1
+    while pointer > 0 and input_message[pointer-1] != END_OF_MESSAGE:
+        pointer -= 1
+    text_end = (pointer - 1) * 8
+
+
+    # set transmission_end to the start of END_OF_TRANSMITION
+    pointer = len(input_message)
+    while pointer > 0 and input_message[pointer-1] != END_OF_TRANSMITION:
+        pointer -= 1
+    transmission_end = (pointer - 1) * 8
+
+
+    logger.debug(f"text_start: {text_start}")
+    logger.debug(f"text_end: {text_end}")
+    logger.debug(f"transmission_end: {transmission_end}")
+
+    text_section_array = message_bit_data[text_start+8:text_end]
+    text_section = Reader(text_section_array)
+    logger.debug(text_section_array)
+
+    statuses_section_array = message_bit_data[text_end+8:transmission_end]
+    statuses_section = Reader(statuses_section_array)
+    logger.debug(statuses_section_array)
+
+    if len(statuses_section) != 0:
+        while statuses_section.pos < len(statuses_section):
+            byte = int(statuses_section.read_bits(8).bin, 2)
+            logger.debug(f"found byte: {byte} at {statuses_section.pos-8}, offset: {statuses_section.pos}, expected next offset: {text_section.pos+9}")
+            statuses += status_table.get(byte, f'UNMAPPED STATUS: {byte}')
+
+
+
+
+    while text_section.pos < len(text_section):
+        remain = len(text_section) - text_section.pos
+
+        # if remain is less than 9 then move text_section.pos to byte alignment
+        if remain < 9:
+            text_section.pos += (8 - text_section.pos % 8) % 8
+            break
+
+        start = text_section.peek_bits(1)
+
+        data = text_section.peek_bits(9)
+        byte = int(data[1:].bin, 2)
+
+        if kwargs.get('bit_correct', False):
+            if start.bin == '0':
+                text_section.pos += 9
+                continue
+
+
+            if byte not in allowed_printables:
+                applied_corrections = True
+                text_section.pos += 1
+                continue
+
+        logger.debug(f"{byte} -> {byte.to_bytes()} start: {start}, {data}, offset: {text_section.pos}, expected next offset: {text_section.pos+9}")
+
+        message += byte.to_bytes().decode("latin-1")
+        text_section.pos += 9
+
+
+
+
+    return {"message": message, 'statuses': statuses, 'footer': footer, 'applied_corrections': applied_corrections}
+
+
+
+
+
+
+
+
+
+def repeat_ask_for_input(display_text: str, allowed_inputs: list) -> str:
+
+    while True:
+        user_input = input(display_text)
+        if user_input in allowed_inputs:
+            return user_input
+        print(f"not valid input, require: {allowed_inputs}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='a script to help decode ttyUSB0 [M.A.S.L] messages')
 
-    parser.add_argument('-v', '--verbose', help='adds extra logging', action='store_true')
+    parser.add_argument('-v', '--verbose', help='adds extra logging, repeat for more logging levels, eg -vv', action='count', default=0)
     mode_parsers = parser.add_subparsers(dest='mode', required=True)
+
 
     # extract mode parsers
     extract_mode = mode_parsers.add_parser('extract', help='extracts the text from the messages')
-    
+
+    extract_mode.add_argument('-b', '--bit-correct', help='apply extra bit corrections if needed, possibly corrupts data', action='store_true')
+
+
+
     # handle file input
     extract_group = extract_mode.add_mutually_exclusive_group(required=True)
     extract_group.add_argument('-d', '--dir', help='use on a folder with the downloaded messages to scan all of them, the order is by date modified', type=Path)
@@ -73,118 +202,18 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.verbose:
+    if args.verbose == 0:
+        pass
+    elif args.verbose == 1:
+        logger.level = logging.WARNING
+    elif args.verbose == 2:
+        logger.level = logging.INFO
+    elif args.verbose == 3:
+        logger.level = logging.DEBUG
+    else:
+        print('already above highest logging level')
         logger.level = logging.DEBUG
 
-    def decode_message(input_message: bytes):        
-        # the main decoded message
-        message = ''
-
-        # the control code meanings between 0x03 and 0x04
-        statuses = ''
-
-        # any extra info the function genrates, such as canceling 
-        footer = ''
-        
-        
-        if input_message[-1] in footer_table:
-            footer += f'\n{footer_table[input_message[-1]]}\n'
-        
-        if input_message[0] in footer_table:
-            footer += f'\n{footer_table[input_message[0]]}\n'
-        
-        message_bit_data = BitArray(input_message)
-        
-        total = len(message_bit_data)
-        
-        text_start = 0
-        
-        text_end = total
-        
-        transmission_end = total
-        
-        
-        
-        # set text_start to the start of START_OF_MESSAGE
-        pointer = 0
-        while pointer < len(message) and input_message[pointer] != START_OF_MESSAGE:
-            pointer += 1
-        text_start = (pointer + 1) * 8 - 8
-        
-        # set text_end to the start of END_OF_MESSAGE
-        pointer = len(input_message) - 1
-        while pointer > 0 and input_message[pointer-1] != END_OF_MESSAGE:
-            pointer -= 1
-        text_end = (pointer - 1) * 8
-        
-        
-        # set transmission_end to the start of END_OF_TRANSMITION
-        pointer = len(input_message) - 1
-        while pointer > 0 and input_message[pointer-1] != END_OF_TRANSMITION:
-            pointer -= 1
-        transmission_end = (pointer - 1) * 8
-        
-        
-        
-        text_section = Reader(message_bit_data[text_start+8:text_end])
-        
-        statuses_section = Reader(message_bit_data[text_end+8:transmission_end])
-        logger.debug(statuses_section)
-        if len(statuses_section) != 0:
-            while statuses_section.pos < len(statuses_section):
-                byte = int(statuses_section.read_bits(8).bin, 2)
-                logger.debug(f"found byte: {byte} at {statuses_section.pos-8}")
-                statuses += status_table.get(byte, f'UNMAPPED STATUS: {byte}')
-
-
-
-        
-        while text_section.pos < len(text_section):
-            remain = len(text_section) - text_section.pos
-            
-            # if remain is less than 9 then pad text_section.pos to byte alignment
-            if remain < 9:
-                text_section.pos += (8 - text_section.pos % 8) % 8
-                break
-            
-            start = text_section.peek_bits(1)
-            data = text_section.peek_bits(9)
-            byte = int(data[1:].bin, 2)
-            
-            
-            if start == '0':
-                continue
-                
-            if byte not in allowed_printables:
-                text_section.pos += 1
-                continue
-
-            logger.debug(f"{byte} -> {byte.to_bytes()} start: {start}, {data}")
-
-            message += byte.to_bytes().decode("latin-1")
-            text_section.pos += 8
-            
-
-
-
-        return {"message": message, 'statuses': statuses, 'footer': footer}
-
-
-
-
-
-
-
-
-
-
-    def repeat_ask_for_input(display_text: str, allowed_inputs: list) -> str:
-        
-        while True:
-            user_input = input(display_text)
-            if user_input in allowed_inputs:
-                return user_input
-            print(f"not valid input, require: {allowed_inputs}")
 
 
     if args.mode == 'extract':
@@ -205,21 +234,26 @@ def main() -> None:
 
 
         for file_index, file in enumerate(files):
-            print(f"{file_index}, {file.name}:")
-            transmission = decode_message(file.read_bytes())
+            terminal_size = shutil.get_terminal_size()
+            file_devider = f"{file_index}, {file.name}"
+            print(file_devider, '-'*(terminal_size.columns-len(file_devider)-1))
+
+            transmission = decode_message(file.read_bytes(), bit_correct=args.bit_correct)
 
             message = transmission['message']
             statuses = transmission['statuses']
             footer = transmission['footer']
+            applied_corrections = transmission['applied_corrections']
+            print(f'applied corrections: {applied_corrections}')
 
             print("```")
             print(message)
             print("```")
-            
+
             print("```")
             print(statuses)
             print("```")
-            
+
             print("```")
             print(footer)
             print("```")
@@ -227,24 +261,24 @@ def main() -> None:
     elif args.mode == 'write':
         bit_array = BitArray()
         bit_array.append(f"uint:8={START_OF_MESSAGE}")
-        
+
         print("enter main message")
-        
+
         writing_message = ''
 
         text_to_write = ''
         user_input = input(": ")
         text_to_write = user_input
-            
+
         for letter in text_to_write:
             letter_bits = BitArray.from_bytes(letter.encode('ascii'))
             letter_bits.insert(0, [1])
             bit_array.append(letter_bits)
-        
+
         pad = (8 - len(bit_array) % 8) % 8
         bit_array.append(BitArray.from_zeros(pad))
         writing_message += text_to_write
-        
+
         print(writing_message)
         bit_array.append(f"uint:8={END_OF_MESSAGE}")
 
@@ -264,19 +298,19 @@ def main() -> None:
                 if control_code == None:
                     print(f"invalid status code: {user_input}, {byte_key}")
                     continue
-                
+
                 bit_array.append(f"u8={int(user_input)}")
                 text_to_write = control_code
-                
+
                 writing_status += text_to_write
-                
+
                 print(writing_status)
             except KeyboardInterrupt:
                 print('canceled')
         bit_array.append(f"uint:8={END_OF_TRANSMITION}")
 
-        
-        
-        
+
+
+
         with open(args.output, 'wb') as output_file:
             bit_array.tofile(output_file)
