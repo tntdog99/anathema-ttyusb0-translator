@@ -108,6 +108,7 @@ def decode_message(input_message: bytes, **kwargs):
     logger.debug(f"text_end: {text_end}")
     logger.debug(f"transmission_end: {transmission_end}")
 
+    # split the stream into the two diffrent parts
     text_section_array = message_bit_data[text_start+8:text_end]
     text_section = Reader(text_section_array)
     logger.debug(text_section_array)
@@ -116,15 +117,14 @@ def decode_message(input_message: bytes, **kwargs):
     statuses_section = Reader(statuses_section_array)
     logger.debug(statuses_section_array)
 
+    # add the statues to the message from the end of the message
     if len(statuses_section) != 0:
         while statuses_section.pos < len(statuses_section):
             byte = int(statuses_section.read_bits(8).bin, 2)
             logger.debug(f"found byte: {byte} at {statuses_section.pos-8}, offset: {statuses_section.pos}, expected next offset: {text_section.pos+9}")
             statuses += status_table.get(byte, f'UNMAPPED STATUS: {byte}')
 
-
-
-
+    # parse the main message payload
     while text_section.pos < len(text_section):
         remain = len(text_section) - text_section.pos
 
@@ -139,11 +139,13 @@ def decode_message(input_message: bytes, **kwargs):
         byte = int(data[1:].bin, 2)
 
         if kwargs.get('bit_correct', False):
+            # i found out while making this a 9 bit part is caleld a nonet, sometimes
+            # check if setment starts with a 1, if its a 0 discard the entire byte
             if start.bin == '0':
                 text_section.pos += 9
                 continue
 
-
+            # if its non printable, its probably not aligned, attempt to realign
             if byte not in allowed_printables:
                 applied_corrections = True
                 text_section.pos += 1
@@ -217,7 +219,8 @@ def main() -> None:
 
 
     if args.mode == 'extract':
-
+        
+        # check that the file type matchs the given arguments
         if args.dir is not None:
             if not args.dir.is_dir():
                 print("-d / --dir must be a directory")
@@ -270,8 +273,9 @@ def main() -> None:
         user_input = input(": ")
         text_to_write = user_input
 
+        # add the text to the bit_array and pad it
         for letter in text_to_write:
-            letter_bits = BitArray.from_bytes(letter.encode('ascii'))
+            letter_bits = BitArray.from_bytes(letter.encode('latin-1 '))
             letter_bits.insert(0, [1])
             bit_array.append(letter_bits)
 
@@ -283,7 +287,7 @@ def main() -> None:
         bit_array.append(f"uint:8={END_OF_MESSAGE}")
 
         print("enter status")
-
+        # add the statuses to the message
         print(f"statuses: {status_table}")
         writing_status = ''
         while True:
