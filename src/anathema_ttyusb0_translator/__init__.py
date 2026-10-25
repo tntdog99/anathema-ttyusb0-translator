@@ -276,7 +276,6 @@ def main() -> None:
             print(file_devider, '-'*(terminal_size.columns-len(file_devider)-1))
 
             transmission = decode_message(file.read_bytes(), bit_correct=args.bit_correct)
-            print(transmission)
 
             message = transmission['message']
             statuses = transmission['statuses']
