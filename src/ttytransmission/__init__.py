@@ -53,24 +53,28 @@ allowed_printables.append(0x0A) # \n
 allowed_printables.append(0x0D) # \r
 
 
-def decode_message(input_message: bytes, **kwargs):
+def decode_message(input_message: bytes, bit_correct=False):
     # the main decoded message
     message = ''
 
     # the control code meanings between 0x03 and 0x04
     statuses = ''
-
+    statuses_array: list[int] = []
+    
     # any extra info the function genrates, such as canceling
     footer = ''
-
+    footer_array: list[int] = []
+    
     # whether it skipped any bits
     applied_corrections = False
 
     if input_message[-1] in footer_table:
         footer += f'\n{footer_table[input_message[-1]]}\n'
+        footer_array.append(input_message[-1])
 
     if input_message[0] in footer_table:
         footer += f'\n{footer_table[input_message[0]]}\n'
+        footer_array.append(input_message[0])
 
     message_bit_data = BitArray(input_message)
 
@@ -123,6 +127,7 @@ def decode_message(input_message: bytes, **kwargs):
             byte = int(statuses_section.read_bits(8).bin, 2)
             logger.debug(f"found byte: {byte} at {statuses_section.pos-8}, offset: {statuses_section.pos}, expected next offset: {text_section.pos+9}")
             statuses += status_table.get(byte, f'UNMAPPED STATUS: {byte}')
+            statuses_array.append(byte)
 
     # parse the main message payload
     while text_section.pos < len(text_section):
@@ -138,7 +143,7 @@ def decode_message(input_message: bytes, **kwargs):
         data = text_section.peek_bits(9)
         byte = int(data[1:].bin, 2)
 
-        if kwargs.get('bit_correct', False):
+        if bit_correct:
             # i found out while making this a 9 bit part is caleld a nonet, sometimes
             # check if setment starts with a 1, if its a 0 discard the entire byte
             if start.bin == '0':
@@ -159,11 +164,40 @@ def decode_message(input_message: bytes, **kwargs):
 
 
 
-    return {"message": message, 'statuses': statuses, 'footer': footer, 'applied_corrections': applied_corrections}
+    return {
+        "message": message,
+        'statuses': statuses,
+        'footer': footer,
+        'applied_corrections': applied_corrections,
+        'statuses_array': statuses_array,
+        'footer_array': footer_array
+        }
+
+
+def encode_message(message: str, statuses: list[int]) -> bytes:
+    bit_array = BitArray()
+    bit_array.append(f"uint:8={START_OF_MESSAGE}")
+
+    # add the text to the bit_array and pad it
+    for letter in message:
+        letter_bits = BitArray.from_bytes(letter.encode('latin-1 '))
+        letter_bits.insert(0, [1])
+        bit_array.append(letter_bits)
+
+    pad = (8 - len(bit_array) % 8) % 8
+    bit_array.append(BitArray.from_zeros(pad))
+
+    bit_array.append(f"uint:8={END_OF_MESSAGE}")
+
+    for status in statuses:
+        bit_array.append(f"u8={int(status)}")
+
+    bit_array.append(f"uint:8={END_OF_TRANSMITION}")
 
 
 
 
+    return bit_array.to_bytes()
 
 
 
@@ -242,6 +276,7 @@ def main() -> None:
             print(file_devider, '-'*(terminal_size.columns-len(file_devider)-1))
 
             transmission = decode_message(file.read_bytes(), bit_correct=args.bit_correct)
+            print(transmission)
 
             message = transmission['message']
             statuses = transmission['statuses']
@@ -262,48 +297,31 @@ def main() -> None:
             print("```")
 
     elif args.mode == 'write':
-        bit_array = BitArray()
-        bit_array.append(f"uint:8={START_OF_MESSAGE}")
+
 
         print("enter main message")
 
-        writing_message = ''
+        main_message = input(": ")
 
-        text_to_write = ''
-        user_input = input(": ")
-        text_to_write = user_input
-
-        # add the text to the bit_array and pad it
-        for letter in text_to_write:
-            letter_bits = BitArray.from_bytes(letter.encode('latin-1 '))
-            letter_bits.insert(0, [1])
-            bit_array.append(letter_bits)
-
-        pad = (8 - len(bit_array) % 8) % 8
-        bit_array.append(BitArray.from_zeros(pad))
-        writing_message += text_to_write
-
-        print(writing_message)
-        bit_array.append(f"uint:8={END_OF_MESSAGE}")
 
         print("enter status")
         # add the statuses to the message
         print(f"statuses: {status_table}")
         writing_status = ''
+        statuses: list[int] = []
         while True:
             user_input_type = repeat_ask_for_input('finish / code : ', ['finish','code'])
             if user_input_type == 'finish':
                 break
             try:
-                user_input = input(": ")
-                text_to_write = user_input
-                byte_key = bytes([int(user_input)])
-                control_code = status_table.get(int(user_input), None)
+                control_code_input = input(": ")
+                byte_key = bytes([int(control_code_input)])
+                control_code = status_table.get(int(control_code_input), None)
                 if control_code == None:
-                    print(f"invalid status code: {user_input}, {byte_key}")
+                    print(f"invalid status code: {control_code_input}, {byte_key}")
                     continue
 
-                bit_array.append(f"u8={int(user_input)}")
+                statuses.append(int(control_code_input))
                 text_to_write = control_code
 
                 writing_status += text_to_write
@@ -311,10 +329,7 @@ def main() -> None:
                 print(writing_status)
             except KeyboardInterrupt:
                 print('canceled')
-        bit_array.append(f"uint:8={END_OF_TRANSMITION}")
-
-
-
-
-        with open(args.output, 'wb') as output_file:
-            bit_array.tofile(output_file)
+        
+        message_bytes = encode_message(main_message, statuses)
+        args.output.write_bytes(message_bytes)
+            
