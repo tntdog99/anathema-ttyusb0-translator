@@ -1,4 +1,4 @@
-from anathema-ttyusb0-translator import decode_message
+from anathema_ttyusb0_translator import decode_message
 
 
 

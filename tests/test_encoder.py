@@ -1,4 +1,4 @@
-from anathema-ttyusb0-translator import encode_message
+from anathema_ttyusb0_translator import encode_message
 
 # main message: hello_world!
 # status: ENQ, BEL
