@@ -3,6 +3,25 @@ revision = 3
 requires-python = ">=3.11"
 
 [[package]]
+name = "anathema-ttyusb0-translator"
+version = "0.1.1"
+source = { editable = "." }
+dependencies = [
+    { name = "bitstring" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "bitstring" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest" }]
+
+[[package]]
 name = "bitstring"
 version = "5.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -112,22 +131,3 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5d/05/5cf729b8b77e1d95c3c8d367b473d3c9b1f063beed386e564f769117baa1/tibs-2.0.2-cp314-cp314t-win_amd64.whl", hash = "sha256:e9ec54d707ac0e94c3e5a7fd50ff5427189dd0d81c2d3e637493b0a2a0393105", size = 867983, upload-time = "2026-10-06T15:10:44.924Z" },
     { url = "https://files.pythonhosted.org/packages/10/5e/86940216fc1473c1935f8d159b24790d2104a9de51c2702f04c978cf9784/tibs-2.0.2-cp314-cp314t-win_arm64.whl", hash = "sha256:f354d205f3355c14bdf1248a497eedde719b372d3f6fab81288a941d5c86aee8", size = 820342, upload-time = "2026-10-06T15:10:46.07Z" },
 ]
-
-[[package]]
-name = "ttytransmission"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "bitstring" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "bitstring" }]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest" }]

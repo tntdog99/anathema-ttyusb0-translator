@@ -1,33 +1,37 @@
 # a script to help decode ttyUSB0 [M.A.S.L] messages
 
+## installation
 
+```bash
+pip install anathema-ttyusb0-translator
+```
 
 ## usage  
 
 ```bash
-ttytransmission --help
+anathema-ttyusb0-translator --help
 ```
 
 #### extract from file
 
 ```bash
-ttytransmission extract -f example_file
+anathema-ttyusb0-translator extract -f example_file
 ```
 
 #### extract from file with error correction
 ```bash
-ttytransmission extract -f example_file --bit-correct
+anathema-ttyusb0-translator extract -f example_file --bit-correct
 ```
 
 #### extract from folder  
 ```bash
-ttytransmission extract -d exaple_folder
+anathema-ttyusb0-translator extract -d exaple_folder
 ```
 
 #### writing message
 
 ````text
-❯ ttytransmission write -o example_file
+❯ anathema-ttyusb0-translator write -o example_file
 enter main message
 : hello, world!
 hello, world!
@@ -38,7 +42,7 @@ finish / code : code
 BEL
 finish / code : finish
 
-❯ ttytransmission extract -f example_file
+❯ anathema-ttyusb0-translator extract -f example_file
 0, example_file ----------------
 applied corrections: False
 ```
