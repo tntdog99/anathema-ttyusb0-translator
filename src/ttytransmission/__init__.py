@@ -1,8 +1,9 @@
 import argparse
-from pathlib import Path
-from bitstring import BitArray, Reader
-import sys
 import logging
+import sys
+from pathlib import Path
+
+from bitstring import BitArray, Reader
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,9 +45,9 @@ footer_table: dict[int, str] = {
 allowed_printables = []
 
 # add ascii codes
-for code in range(32, 127):
-    allowed_printables.append(code)
+allowed_printables.extend(range(32, 127))
 
+# add newlines
 allowed_printables.append(0x0A) # \n
 allowed_printables.append(0x0D) # \r
 
@@ -232,7 +233,7 @@ def main() -> None:
         writing_message = ''
 
         text_to_write = ''
-        user_input = input(f": ")
+        user_input = input(": ")
         text_to_write = user_input
             
         for letter in text_to_write:
@@ -256,7 +257,7 @@ def main() -> None:
             if user_input_type == 'finish':
                 break
             try:
-                user_input = input(f": ")
+                user_input = input(": ")
                 text_to_write = user_input
                 byte_key = bytes([int(user_input)])
                 control_code = status_table.get(int(user_input), None)
