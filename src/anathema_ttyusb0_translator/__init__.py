@@ -6,6 +6,13 @@ import shutil
 
 from bitstring import BitArray, Reader
 
+from importlib.metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version("anathema-ttyusb0-translator")
+except PackageNotFoundError:
+    __version__ = "unknown"
+
 logging.basicConfig(
     level=logging.ERROR,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -214,9 +221,9 @@ def repeat_ask_for_input(display_text: str, allowed_inputs: list) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='a script to help decode ttyUSB0 [M.A.S.L] messages')
-
+    parser.add_argument('--version', help='print version number', action='store_true')
     parser.add_argument('-v', '--verbose', help='adds extra logging, repeat for more logging levels, eg -vv', action='count', default=0)
-    mode_parsers = parser.add_subparsers(dest='mode', required=True)
+    mode_parsers = parser.add_subparsers(dest='mode')
 
 
     # extract mode parsers
@@ -237,6 +244,10 @@ def main() -> None:
     write_mode.add_argument("-o", '--output', help='the file to write the output to', required=True, type=Path)
 
     args = parser.parse_args()
+
+    if args.version:
+        print(f'Version: {__version__}')
+        return 0
 
     if args.verbose == 0:
         pass
