@@ -60,10 +60,18 @@ allowed_printables.append(0x0A) # \n
 allowed_printables.append(0x0D) # \r
 
 
-def decode_message(input_message: bytes, bit_correct=False) -> dict:
+def decode_message(input_message: bytes, bit_correct=False, decode_type=0, statuses_detection=False) -> dict:
+    # decode_type = 0 # text
+    # decode_type = 1 # binary
+    
+    
+    
     # the main decoded message
-    message = ''
-
+    message = None
+    if decode_type == 0:
+        message = ''
+    elif decode_type ==1:
+        message = bytes()
     # the control code meanings between 0x03 and 0x04
     statuses = ''
     statuses_array: list[int] = []
@@ -101,18 +109,23 @@ def decode_message(input_message: bytes, bit_correct=False) -> dict:
         pointer += 1
     text_start = (pointer + 1) * 8 - 8
 
-    # set text_end to the start of END_OF_MESSAGE
-    pointer = len(input_message) - 1
-    while pointer > 0 and input_message[pointer-1] != END_OF_MESSAGE:
-        pointer -= 1
-    text_end = (pointer - 1) * 8
+    if statuses_detection:
+        # set text_end to the start of END_OF_MESSAGE
+        pointer = len(input_message) - 1
+        while pointer > 0 and input_message[pointer-1] != END_OF_MESSAGE:
+            pointer -= 1
+        text_end = (pointer - 1) * 8
 
 
-    # set transmission_end to the start of END_OF_TRANSMITION
-    pointer = len(input_message)
-    while pointer > 0 and input_message[pointer-1] != END_OF_TRANSMITION:
-        pointer -= 1
-    transmission_end = (pointer - 1) * 8
+
+        # set transmission_end to the start of END_OF_TRANSMITION
+        pointer = len(input_message)
+        while pointer > 0 and input_message[pointer-1] != END_OF_TRANSMITION:
+            pointer -= 1
+        transmission_end = (pointer - 1) * 8
+    else:
+        text_end = (len(input_message)-1)*8
+        transmission_end = len(input_message)*8
 
 
     logger.debug(f"text_start: {text_start}")
@@ -164,8 +177,10 @@ def decode_message(input_message: bytes, bit_correct=False) -> dict:
                 continue
 
         # logger.debug(f"{byte} -> {byte.to_bytes()} start: {start}, {data}, offset: {text_section.pos}, expected next offset: {text_section.pos+9}")
-
-        message += byte.to_bytes().decode("latin-1")
+        if decode_type == 0:
+            message += byte.to_bytes().decode("latin-1")
+        elif decode_type == 1:
+            message += byte.to_bytes()
         posistion += 9
 
 
@@ -231,8 +246,8 @@ def main() -> None:
 
     extract_mode.add_argument('-b', '--bit-correct', help='apply extra bit corrections if needed, possibly corrupts data', action='store_true')
 
-
-
+    extract_mode.add_argument('-r', '--raw', help='writes to a binary file', type=Path, default=None)
+    extract_mode.add_argument('-s', '--statuses-detection', help='enables detection of the end of message', action='store_true')
     # handle file input
     extract_group = extract_mode.add_mutually_exclusive_group(required=True)
     extract_group.add_argument('-d', '--dir', help='use on a folder with the downloaded messages to scan all of them, the order is by date modified', type=Path)
@@ -262,8 +277,8 @@ def main() -> None:
         logger.level = logging.DEBUG
 
 
-
     if args.mode == 'extract':
+        print(f"bit-correct: {args.bit_correct}, statuses-detection: {args.statuses_detection}")
         
         # check that the file type matchs the given arguments
         if args.dir is not None:
@@ -279,14 +294,20 @@ def main() -> None:
 
         # sort by time made
         files.sort(key=lambda file: file.stat().st_mtime)
-
+        
+        
+        decode_type = None
+        if args.raw is None:
+            decode_type = 0 # text
+        elif args.raw is not None:
+            decode_type = 1 # binary
 
         for file_index, file in enumerate(files):
             terminal_size = shutil.get_terminal_size()
             file_devider = f"{file_index}, {file.name}"
             print(file_devider, '-'*(terminal_size.columns-len(file_devider)-1))
 
-            transmission = decode_message(file.read_bytes(), bit_correct=args.bit_correct)
+            transmission = decode_message(file.read_bytes(), bit_correct=args.bit_correct, decode_type=decode_type, statuses_detection=args.statuses_detection)
 
             message = transmission['message']
             statuses = transmission['statuses']
@@ -295,7 +316,11 @@ def main() -> None:
             print(f'applied corrections: {applied_corrections}')
 
             print("```")
-            print(message)
+            if decode_type == 0:
+                print(message)
+            elif decode_type == 1:
+                args.raw.write_bytes(message)
+                print(f'wrote to {str(args.raw)}')
             print("```")
 
             print("```")
