@@ -31,7 +31,7 @@ def decode_message(
     bit_correct: bool = False,
     decode_type: int = 0,
     statuses_detection: bool = False,
-    gpg_brute: bool = False,
+    gpg_block: bool = False,
     gpg_brute_bytes: int = 1,
     ) -> dict:
     # decode_type = 0 # text
@@ -157,7 +157,7 @@ def decode_message(
         posistion += 9
 
 
-    if gpg_brute == True and decode_type == 0:
+    if gpg_block == True and decode_type == 0:
         message, worked = fix_gpg_thing(message, gpg_brute_bytes)
         if worked == False:
             message = 'failed to verify checksum'
@@ -422,7 +422,8 @@ def main() -> None:
 
     extract_mode.add_argument('-r', '--raw', help='writes to a binary file', type=Path, default=None)
     extract_mode.add_argument('-s', '--statuses-detection', help='enables detection of the end of message', action='store_true')
-    extract_mode.add_argument('--gpg-brute', help='tries to fix the gpg message', action='store_true')
+    extract_mode.add_argument('--gpg-block', help='tries to fix the gpg message', action='store_true')
+    extract_mode.add_argument('--gpg-brute-bytes', help='the amount of bytes to try and brute force the gpg block, dont set this above 1', type=int, default=1)
 
     # handle file input
     extract_group = extract_mode.add_mutually_exclusive_group(required=True)
@@ -454,7 +455,7 @@ def main() -> None:
 
 
     if args.mode == 'extract':
-        print(f"bit-correct: {args.bit_correct}, statuses-detection: {args.statuses_detection}, gpg-brute: {args.gpg_brute}")
+        print(f"bit-correct: {args.bit_correct}, statuses-detection: {args.statuses_detection}, gpg-block: {args.gpg_block} gpg-brute-bytes: {args.gpg_brute_bytes}")
         
         # check that the file type matchs the given arguments
         if args.dir is not None:
@@ -488,7 +489,8 @@ def main() -> None:
                 bit_correct=args.bit_correct,
                 decode_type=decode_type,
                 statuses_detection=args.statuses_detection,
-                gpg_brute=args.gpg_brute
+                gpg_block=args.gpg_block,
+                gpg_brute_bytes=args.gpg_brute_bytes
                 )
 
             message = transmission['message']
@@ -497,17 +499,17 @@ def main() -> None:
             applied_corrections = transmission['applied_corrections']
             print(f'applied corrections: {applied_corrections}')
 
-            print("```")
+            print("`````")
             if decode_type == 0:
                 print(message)
             elif decode_type == 1:
                 args.raw.write_bytes(message)
                 print(f'wrote to {str(args.raw)}')
-            print("```")
+            print("`````")
 
-            print("```")
+            print("````")
             print(statuses)
-            print("```")
+            print("````")
 
             print("```")
             print(footer)
