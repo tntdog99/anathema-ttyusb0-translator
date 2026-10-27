@@ -19,6 +19,6 @@ def test_message_decoder():
         expected = message[0]
         encoder_settings = message[1]
         
-        test_decode = decode_message(encoder_settings[0], bit_correct=encoder_settings[1])
+        test_decode = decode_message(*encoder_settings)
 
         assert expected == test_decode
