@@ -60,7 +60,7 @@ allowed_printables.append(0x0A) # \n
 allowed_printables.append(0x0D) # \r
 
 
-def decode_message(input_message: bytes, bit_correct=False):
+def decode_message(input_message: bytes, bit_correct=False) -> dict:
     # the main decoded message
     message = ''
 
@@ -136,37 +136,37 @@ def decode_message(input_message: bytes, bit_correct=False):
             statuses += status_table.get(byte, f'UNMAPPED STATUS: {byte}')
             statuses_array.append(byte)
 
+    
+    bits = text_section_array.bin
+    posistion = 0
     # parse the main message payload
-    while text_section.pos < len(text_section):
-        remain = len(text_section) - text_section.pos
+    while posistion < len(bits):
+        remain = len(text_section) - posistion
 
         # if remain is less than 9 then move text_section.pos to byte alignment
         if remain < 9:
-            text_section.pos += (8 - text_section.pos % 8) % 8
+            posistion += (8 - posistion % 8) % 8
             break
 
-        start = text_section.peek_bits(1)
-
-        data = text_section.peek_bits(9)
-        byte = int(data[1:].bin, 2)
+        byte = int(bits[posistion + 1:posistion + 9], 2)
 
         if bit_correct:
             # i found out while making this a 9 bit part is caleld a nonet, sometimes
             # check if setment starts with a 1, if its a 0 discard the entire byte
-            if start.bin == '0':
-                text_section.pos += 9
+            if bits[posistion] == '0':
+                posistion += 9
                 continue
 
             # if its non printable, its probably not aligned, attempt to realign
             if byte not in allowed_printables:
                 applied_corrections = True
-                text_section.pos += 1
+                posistion += 1
                 continue
 
-        logger.debug(f"{byte} -> {byte.to_bytes()} start: {start}, {data}, offset: {text_section.pos}, expected next offset: {text_section.pos+9}")
+        # logger.debug(f"{byte} -> {byte.to_bytes()} start: {start}, {data}, offset: {text_section.pos}, expected next offset: {text_section.pos+9}")
 
         message += byte.to_bytes().decode("latin-1")
-        text_section.pos += 9
+        posistion += 9
 
 
 
@@ -179,7 +179,7 @@ def decode_message(input_message: bytes, bit_correct=False):
         'statuses_array': statuses_array,
         'footer_array': footer_array
         }
-
+    
 
 def encode_message(message: str, statuses: list[int]) -> bytes:
     bit_array = BitArray()
