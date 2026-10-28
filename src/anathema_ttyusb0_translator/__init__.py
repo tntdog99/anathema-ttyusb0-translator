@@ -7,6 +7,12 @@ import base64
 import re
 import binascii
 from itertools import combinations, product
+import time
+from functools import partial
+import timeit
+
+from numba import njit
+import numpy as np
 
 from bitstring import BitArray, Reader
 
@@ -160,8 +166,11 @@ def decode_message(
     if gpg_block == True and decode_type == 0:
         message, worked = fix_gpg_thing(message, gpg_brute_bytes)
         if worked == False:
-            message = 'failed to verify checksum'
-            message += message
+            message += '\n'
+            message += '\nFAILED TO VERIFY CHECKSUM'
+            message += '\nFAILED TO VERIFY CHECKSUM'
+            message += '\nFAILED TO VERIFY CHECKSUM'
+            
     return {
         "message": message,
         'statuses': statuses,
@@ -198,23 +207,22 @@ def encode_message(message: str, statuses: list[int]) -> bytes:
 
     return bit_array.to_bytes()
 
-
-
+@njit
 def compute_cr24_checksum(data: bytes) -> int:
     crc = 0xB704CE
     for octet in data:
         crc = ((crc << 8) & 0xFFFFFF) ^ CRC24_TABLE[((crc >> 16) ^ octet) & 0xFF]
     return crc
 
-def make_checksum_table():
-    table = []
+def make_checksum_table() -> np.ndarray:
+    table = np.zeros(256, dtype=np.int64)
     for i in range(256):
         crc = i << 16
         for _ in range(8):
             crc <<= 1
             if crc & 0x1000000:
                 crc ^= 0x1864CFB
-        table.append(crc & 0xFFFFFF)
+        table[i] = crc & 0xFFFFFF
     return table
 
 
@@ -276,31 +284,18 @@ def fix_gpg_thing(gpg_thing: str, gpg_brute_bytes: int = 2):
     gpg_parts.append(used_end_header.strip())
     logger.info('brute forcing the key')
     
-    attempt_number = 0
-    fixed = False
     temp_text = re.sub(r'\s', '', "".join(char for char in gpg_parts[1] if char in B64_ALPHABET))
     checksum_bytes = int.from_bytes(base64.b64decode(gpg_parts[2].lstrip('=')), 'big')
     
-    for mutated_text in brute_force_gpg(temp_text, gpg_brute_bytes):
-        attempt_number += 1
-        if attempt_number % 2**13 == 0:
-            logger.info(f'attempt: {attempt_number}: {mutated_text}')
-        
-        try:
-            test_bytes = base64.b64decode(mutated_text)
-            
-            if compute_cr24_checksum(test_bytes) == checksum_bytes:
-                fixed = True
-                gpg_parts[1] = base64.b64encode(test_bytes).decode()
-                break
-        except binascii.Error:
-            pass
+    
+    gpg_parts[1], fixed = brute_force_gpg(temp_text, checksum_bytes, gpg_brute_bytes)
     
     # no correct code found
     if not fixed:
         return None, False
     
     output_gpg += gpg_parts[0]
+    output_gpg += '\n'
     output_gpg += '\n'
     current_line_length = 0
     line_to_add = ''
@@ -325,11 +320,32 @@ def fix_gpg_thing(gpg_thing: str, gpg_brute_bytes: int = 2):
     return output_gpg, True
 
 
+def brute_force_gpg(text: str, checksum: bytes, gpg_brute_bytes: int = 2):
+    attempt_number = 0
+    for mutated_text in brute_force_gpg_gen(text, gpg_brute_bytes):
+        attempt_number += 1
+        if attempt_number % 2**16 == 0:
+            logger.info(f'attempt: {attempt_number}: {mutated_text}')
+        
+        try:
+            test_bytes = base64.b64decode(mutated_text)
+            
+            if compute_cr24_checksum(test_bytes) == checksum:
+                temp_text = base64.b64encode(test_bytes).decode()
+                return temp_text, True
+        except binascii.Error:
+            pass
+    return None, False
 
 
-def brute_force_gpg(text: str, max_changes: int = 2):
+
+def brute_force_gpg_gen(text: str, max_changes: int = 2):
     yield text
 
+
+
+    # substitutions
+      
     for number_of_changes in range(1, max_changes + 1):
         for positions in combinations(range(len(text)), number_of_changes):
             options = [[c for c in B64_ALPHABET if c != text[p]] for p in positions]
@@ -344,13 +360,16 @@ def brute_force_gpg(text: str, max_changes: int = 2):
                 for position, char in zip(positions, new_chars):
                     chars[position] = char
                 yield ''.join(chars)
+    # del
+    for number_of_changes in range(1, max_changes + 1):
+        for positions in combinations(range(len(text)), number_of_changes):
+            drop = set(positions)
+            yield ''.join(char for index, char in enumerate(text) if index not in drop)
 
+    # insert
     for i in range(len(text) + 1):
         for char in B64_ALPHABET:
             yield text[:i] + char + text[i:]
-
-    for i in range(len(text)):
-        yield text[:i] + text[i+1:]
 
 
 
@@ -402,9 +421,21 @@ allowed_printables.extend(range(32, 127))
 allowed_printables.append(0x0A) # \n
 allowed_printables.append(0x0D) # \r
 
-B64_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+B64_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
 
 CRC24_TABLE = make_checksum_table()
+
+
+JIT_FUNCTIONS = [
+                        (compute_cr24_checksum, (b'\x00'*16))
+                        
+                        ]
+
+TIME_FUNCTION_TIMES_TO_RUN = 10000
+# warm up the JIT
+for function, input_data in JIT_FUNCTIONS:
+    for _ in range(3):
+        function(input_data)
 
 
 
@@ -412,6 +443,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='a script to help decode ttyUSB0 [M.A.S.L] messages')
     parser.add_argument('--version', help='print version number', action='store_true')
     parser.add_argument('-v', '--verbose', help='adds extra logging, repeat for more logging levels, eg -vv', action='count', default=0)
+    parser.add_argument('--time', help='times the execution time', action='store_true')
     mode_parsers = parser.add_subparsers(dest='mode')
 
 
@@ -424,6 +456,7 @@ def main() -> None:
     extract_mode.add_argument('-s', '--statuses-detection', help='enables detection of the end of message', action='store_true')
     extract_mode.add_argument('--gpg-block', help='tries to fix the gpg message', action='store_true')
     extract_mode.add_argument('--gpg-brute-bytes', help='the amount of bytes to try and brute force the gpg block, dont set this above 1', type=int, default=1)
+
 
     # handle file input
     extract_group = extract_mode.add_mutually_exclusive_group(required=True)
@@ -453,7 +486,16 @@ def main() -> None:
         print('already above highest logging level')
         logger.level = logging.DEBUG
 
+    if args.time:
+        for function, data in JIT_FUNCTIONS:
+            jit_no_arg = partial(function, data)
+            execution_times = timeit.repeat(jit_no_arg, number=TIME_FUNCTION_TIMES_TO_RUN, repeat=5)
+            print(f"JIT execution time: {min(execution_times)/TIME_FUNCTION_TIMES_TO_RUN} seconds")
+            python_no_arg = partial(function.py_func, data)
+            execution_times = timeit.repeat(python_no_arg, number=TIME_FUNCTION_TIMES_TO_RUN, repeat=5)
+            print(f"python execution time: {min(execution_times)/TIME_FUNCTION_TIMES_TO_RUN} seconds")
 
+    start_time = time.time()
     if args.mode == 'extract':
         print(f"bit-correct: {args.bit_correct}, statuses-detection: {args.statuses_detection}, gpg-block: {args.gpg_block} gpg-brute-bytes: {args.gpg_brute_bytes}")
         
@@ -479,6 +521,7 @@ def main() -> None:
         elif args.raw is not None:
             decode_type = 1 # binary
 
+        
         for file_index, file in enumerate(files):
             terminal_size = shutil.get_terminal_size()
             file_devider = f"{file_index}, {file.name}"
@@ -551,4 +594,7 @@ def main() -> None:
         
         message_bytes = encode_message(main_message, statuses)
         args.output.write_bytes(message_bytes)
-            
+    if args.time:
+        print(f'took: {time.time()-start_time} seconds')
+        
+        
