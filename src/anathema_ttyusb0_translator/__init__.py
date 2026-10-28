@@ -207,6 +207,10 @@ def encode_message(message: str, statuses: list[int]) -> bytes:
 
     return bit_array.to_bytes()
 
+# gpg auto fix stuff
+
+#region
+
 @njit
 def compute_cr24_checksum(data: bytes) -> int:
     crc = 0xB704CE
@@ -226,9 +230,9 @@ def make_checksum_table() -> np.ndarray:
     return table
 
 
-def fix_gpg_thing(gpg_thing: str, gpg_brute_bytes: int = 2):
+def fix_gpg_thing(gpg_block: str, gpg_brute_bytes: int = 2):
     logger.info('fixing gpg block')
-    gpg_thing = gpg_thing
+    gpg_block = gpg_block
     output_gpg = ''
     gpg_parts = []
     
@@ -251,36 +255,36 @@ def fix_gpg_thing(gpg_thing: str, gpg_brute_bytes: int = 2):
     found_header = False
     for start_header in armor_start_headers:
         header_line = '-'*5+start_header+'-'*5
-        header_index = gpg_thing.find(header_line)
+        header_index = gpg_block.find(header_line)
         if header_index == -1:
             continue
         used_start_header = header_line
         found_header = True
         
     if found_header is False:
-        return gpg_thing, False
+        return gpg_block, False
         
     found_header = False
     logger.info('finding gpg end header')
     for end_header in armor_end_headers:
         header_line = '-'*5+end_header+'-'*5
-        header_index = gpg_thing.find(header_line)
+        header_index = gpg_block.find(header_line)
         if header_index == -1:
             continue
         used_end_header = header_line
         found_header = True
     if found_header is False:
-        return gpg_thing, False
+        return gpg_block, False
     logger.info('finding gpg cr24 checksum')
     
-    equal_sign_index = gpg_thing.rfind('=')
+    equal_sign_index = gpg_block.rfind('=')
     
     if equal_sign_index == -1:
-        return gpg_thing, False
+        return gpg_block, False
     
     gpg_parts.append(used_start_header.strip())
-    gpg_parts.append(gpg_thing[gpg_thing.find(used_start_header)+len(used_start_header): equal_sign_index].strip())
-    gpg_parts.append(gpg_thing[equal_sign_index:gpg_thing.find(used_end_header)].strip())
+    gpg_parts.append(gpg_block[gpg_block.find(used_start_header)+len(used_start_header): equal_sign_index].strip())
+    gpg_parts.append(gpg_block[equal_sign_index:gpg_block.find(used_end_header)].strip())
     gpg_parts.append(used_end_header.strip())
     logger.info('brute forcing the key')
     
@@ -292,7 +296,7 @@ def fix_gpg_thing(gpg_thing: str, gpg_brute_bytes: int = 2):
     
     # no correct code found
     if not fixed:
-        return None, False
+        return gpg_block, False
     
     output_gpg += gpg_parts[0]
     output_gpg += '\n'
@@ -320,58 +324,116 @@ def fix_gpg_thing(gpg_thing: str, gpg_brute_bytes: int = 2):
     return output_gpg, True
 
 
-def brute_force_gpg(text: str, checksum: bytes, gpg_brute_bytes: int = 2):
-    attempt_number = 0
-    for mutated_text in brute_force_gpg_gen(text, gpg_brute_bytes):
-        attempt_number += 1
-        if attempt_number % 2**16 == 0:
-            logger.info(f'attempt: {attempt_number}: {mutated_text}')
-        
-        try:
-            test_bytes = base64.b64decode(mutated_text)
-            
-            if compute_cr24_checksum(test_bytes) == checksum:
-                temp_text = base64.b64encode(test_bytes).decode()
-                return temp_text, True
-        except binascii.Error:
-            pass
-    return None, False
+
+def brute_force_gpg(text: str, checksum: int, gpg_brute_bytes: int = 2):
+    base64_text = text.rstrip('=')
+
+    
+    # tries to repair it if its too long
+    if len(base64_text) % 4 == 1:
+        for deleted_index in range(len(base64_text)):
+            repaired_text = base64_text[:deleted_index] + base64_text[deleted_index + 1:]
+            repaired_bytes = np.frombuffer(base64.b64decode(repaired_text), dtype=np.uint8)
+            if compute_cr24_checksum(repaired_bytes) == checksum:
+                return repaired_text, True
+        return None, False
+
+    # pad the base64
+    padded_text = base64_text + '=' * (-len(base64_text) % 4)
+    
+    # convert the base64 into bytes
+    original_bytes = np.frombuffer(base64.b64decode(padded_text), dtype=np.uint8).copy()
+
+    
+    fixed, fixed_bytes = brute_force_gpg_bytes(original_bytes, checksum, gpg_brute_bytes)
+    if not fixed:
+        return None, False
+
+    return base64.b64encode(fixed_bytes.tobytes()).decode(), True
 
 
 
-def brute_force_gpg_gen(text: str, max_changes: int = 2):
-    yield text
+@njit
+def advance_combination(positions: np.ndarray, pool_size: int) -> bool:
+    combination_size = len(positions)
+    slot = combination_size - 1
+    while slot >= 0 and positions[slot] == slot + pool_size - combination_size:
+        slot -= 1
+    if slot < 0:
+        return False
+    positions[slot] += 1
+    for later_slot in range(slot + 1, combination_size):
+        positions[later_slot] = positions[later_slot - 1] + 1
+    return True
 
 
+@njit
+def brute_force_gpg_bytes(original_bytes: np.ndarray, expected_checksum: int, max_changes: int):
+    byte_count = len(original_bytes)
 
-    # substitutions
-      
-    for number_of_changes in range(1, max_changes + 1):
-        for positions in combinations(range(len(text)), number_of_changes):
-            options = [[c for c in B64_ALPHABET if c != text[p]] for p in positions]
-            # options = []
-            # for position in positions:
-            #     temp_chars = []
-            #     for char in B64_ALPHABET:
-            #         if char != text[position]:
-            #             temp_chars.append(char)
-            for new_chars in product(*options):
-                chars = list(text)
-                for position, char in zip(positions, new_chars):
-                    chars[position] = char
-                yield ''.join(chars)
+    if compute_cr24_checksum(original_bytes) == expected_checksum:
+        return True, original_bytes
+
+    # sub
+    candidate = original_bytes.copy()
+    for change_count in range(1, max_changes + 1):
+        if change_count > byte_count:
+            break
+        positions = np.arange(change_count)
+        while True:
+            value_offsets = np.ones(change_count, dtype=np.int64)
+            while True:
+                for slot in range(change_count):
+                    candidate[positions[slot]] = (original_bytes[positions[slot]] + value_offsets[slot]) % 256
+                if compute_cr24_checksum(candidate) == expected_checksum:
+                    return True, candidate
+
+                slot = change_count - 1
+                while slot >= 0 and value_offsets[slot] == 255:
+                    value_offsets[slot] = 1
+                    slot -= 1
+                if slot < 0:
+                    break
+                value_offsets[slot] += 1
+
+            for slot in range(change_count):
+                candidate[positions[slot]] = original_bytes[positions[slot]]
+            if not advance_combination(positions, byte_count):
+                break
+
     # del
-    for number_of_changes in range(1, max_changes + 1):
-        for positions in combinations(range(len(text)), number_of_changes):
-            drop = set(positions)
-            yield ''.join(char for index, char in enumerate(text) if index not in drop)
+    for change_count in range(1, max_changes + 1):
+        if change_count > byte_count:
+            break
+        positions = np.arange(change_count)
+        shortened = np.empty(byte_count - change_count, dtype=np.uint8)
+        while True:
+            write_index = 0
+            next_deleted_slot = 0
+            for read_index in range(byte_count):
+                if next_deleted_slot < change_count and positions[next_deleted_slot] == read_index:
+                    next_deleted_slot += 1
+                    continue
+                shortened[write_index] = original_bytes[read_index]
+                write_index += 1
+            if compute_cr24_checksum(shortened) == expected_checksum:
+                return True, shortened
+            if not advance_combination(positions, byte_count):
+                break
 
     # insert
-    for i in range(len(text) + 1):
-        for char in B64_ALPHABET:
-            yield text[:i] + char + text[i:]
+    lengthened = np.empty(byte_count + 1, dtype=np.uint8)
+    for insert_index in range(byte_count + 1):
+        lengthened[:insert_index] = original_bytes[:insert_index]
+        lengthened[insert_index + 1:] = original_bytes[insert_index:]
+        for inserted_value in range(256):
+            lengthened[insert_index] = inserted_value
+            if compute_cr24_checksum(lengthened) == expected_checksum:
+                return True, lengthened
 
+    return False, original_bytes
 
+#endregion
 
 def repeat_ask_for_input(display_text: str, allowed_inputs: list) -> str:
 
@@ -381,6 +443,10 @@ def repeat_ask_for_input(display_text: str, allowed_inputs: list) -> str:
             return user_input
         print(f"not valid input, require: {allowed_inputs}")
 
+
+# constants and init stuff
+
+#region
 
 # contol codes
 
@@ -437,7 +503,7 @@ for function, input_data in JIT_FUNCTIONS:
     for _ in range(3):
         function(input_data)
 
-
+#endregion
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='a script to help decode ttyUSB0 [M.A.S.L] messages')
@@ -596,5 +662,4 @@ def main() -> None:
         args.output.write_bytes(message_bytes)
     if args.time:
         print(f'took: {time.time()-start_time} seconds')
-        
-        
+
