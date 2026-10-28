@@ -60,8 +60,11 @@ def decode_message(
     footer_array: list[int] = []
     
     # whether it skipped any bits
-    applied_corrections = False
+    applied_bit_corrections = False
 
+    # whether or not it applied gpg corrections
+    applied_gpg_corrections = False
+    
     if input_message[-1] in footer_table:
         footer += f'\n{footer_table[input_message[-1]]}\n'
         footer_array.append(input_message[-1])
@@ -146,12 +149,13 @@ def decode_message(
             # i found out while making this a 9 bit part is caleld a nonet, sometimes
             # check if setment starts with a 1, if its a 0 discard the entire byte
             if bits[posistion] == '0':
+                applied_bit_corrections = True
                 posistion += 9
                 continue
 
             # if its non printable, its probably not aligned, attempt to realign
             if byte not in allowed_printables:
-                applied_corrections = True
+                applied_bit_corrections = True
                 posistion += 1
                 continue
 
@@ -164,7 +168,7 @@ def decode_message(
 
 
     if gpg_block == True and decode_type == 0:
-        message, worked = fix_gpg_thing(message, gpg_brute_bytes)
+        message, worked, applied_gpg_corrections = fix_gpg_thing(message, gpg_brute_bytes)
         if worked == False:
             message += '\n'
             message += '\nFAILED TO VERIFY CHECKSUM'
@@ -175,10 +179,11 @@ def decode_message(
         "message": message,
         'statuses': statuses,
         'footer': footer,
-        'applied_corrections': applied_corrections,
+        'applied_bit_corrections': applied_bit_corrections,
         'statuses_array': statuses_array,
         'footer_array': footer_array,
-        'worked': worked
+        'worked': worked,
+        'applied_gpg_corrections': applied_gpg_corrections,
         }
     
 
@@ -235,6 +240,7 @@ def fix_gpg_thing(gpg_block: str, gpg_brute_bytes: int = 2):
     gpg_block = gpg_block
     output_gpg = ''
     gpg_parts = []
+    applied_gpg_corrections = False
     
     armor_start_headers: list[str] = [
         "BEGIN PGP MESSAGE",
@@ -262,7 +268,7 @@ def fix_gpg_thing(gpg_block: str, gpg_brute_bytes: int = 2):
         found_header = True
         
     if found_header is False:
-        return gpg_block, False
+        return gpg_block, False, applied_gpg_corrections
         
     found_header = False
     logger.info('finding gpg end header')
@@ -274,13 +280,13 @@ def fix_gpg_thing(gpg_block: str, gpg_brute_bytes: int = 2):
         used_end_header = header_line
         found_header = True
     if found_header is False:
-        return gpg_block, False
+        return gpg_block, False, applied_gpg_corrections
     logger.info('finding gpg cr24 checksum')
     
     equal_sign_index = gpg_block.rfind('=')
     
     if equal_sign_index == -1:
-        return gpg_block, False
+        return gpg_block, False, applied_gpg_corrections
     
     gpg_parts.append(used_start_header.strip())
     gpg_parts.append(gpg_block[gpg_block.find(used_start_header)+len(used_start_header): equal_sign_index].strip())
@@ -292,11 +298,11 @@ def fix_gpg_thing(gpg_block: str, gpg_brute_bytes: int = 2):
     checksum_bytes = int.from_bytes(base64.b64decode(gpg_parts[2].lstrip('=')), 'big')
     
     
-    gpg_parts[1], fixed = brute_force_gpg(temp_text, checksum_bytes, gpg_brute_bytes)
+    gpg_parts[1], fixed, applied_gpg_corrections = brute_force_gpg(temp_text, checksum_bytes, gpg_brute_bytes)
     
     # no correct code found
     if not fixed:
-        return gpg_block, False
+        return gpg_block, False, applied_gpg_corrections
     
     output_gpg += gpg_parts[0]
     output_gpg += '\n'
@@ -321,13 +327,13 @@ def fix_gpg_thing(gpg_block: str, gpg_brute_bytes: int = 2):
     output_gpg += gpg_parts[3]
     output_gpg += '\n'
 
-    return output_gpg, True
+    return output_gpg, True, applied_gpg_corrections
 
 
 
 def brute_force_gpg(text: str, checksum: int, gpg_brute_bytes: int = 2):
     base64_text = text.rstrip('=')
-
+    applied_gpg_corrections = False
     
     # tries to repair it if its too long
     if len(base64_text) % 4 == 1:
@@ -335,8 +341,9 @@ def brute_force_gpg(text: str, checksum: int, gpg_brute_bytes: int = 2):
             repaired_text = base64_text[:deleted_index] + base64_text[deleted_index + 1:]
             repaired_bytes = np.frombuffer(base64.b64decode(repaired_text), dtype=np.uint8)
             if compute_cr24_checksum(repaired_bytes) == checksum:
-                return repaired_text, True
-        return None, False
+                applied_gpg_corrections = True
+                return repaired_text, True, applied_gpg_corrections
+        return None, False, applied_gpg_corrections
 
     # pad the base64
     padded_text = base64_text + '=' * (-len(base64_text) % 4)
@@ -345,11 +352,11 @@ def brute_force_gpg(text: str, checksum: int, gpg_brute_bytes: int = 2):
     original_bytes = np.frombuffer(base64.b64decode(padded_text), dtype=np.uint8).copy()
 
     
-    fixed, fixed_bytes = brute_force_gpg_bytes(original_bytes, checksum, gpg_brute_bytes)
+    fixed, fixed_bytes, applied_gpg_corrections = brute_force_gpg_bytes(original_bytes, checksum, gpg_brute_bytes)
     if not fixed:
-        return None, False
+        return None, False, applied_gpg_corrections
 
-    return base64.b64encode(fixed_bytes.tobytes()).decode(), True
+    return base64.b64encode(fixed_bytes.tobytes()).decode(), True, applied_gpg_corrections
 
 
 
@@ -372,7 +379,7 @@ def brute_force_gpg_bytes(original_bytes: np.ndarray, expected_checksum: int, ma
     byte_count = len(original_bytes)
 
     if compute_cr24_checksum(original_bytes) == expected_checksum:
-        return True, original_bytes
+        return True, original_bytes, False
 
     # sub
     candidate = original_bytes.copy()
@@ -386,7 +393,7 @@ def brute_force_gpg_bytes(original_bytes: np.ndarray, expected_checksum: int, ma
                 for slot in range(change_count):
                     candidate[positions[slot]] = (original_bytes[positions[slot]] + value_offsets[slot]) % 256
                 if compute_cr24_checksum(candidate) == expected_checksum:
-                    return True, candidate
+                    return True, candidate, True
 
                 slot = change_count - 1
                 while slot >= 0 and value_offsets[slot] == 255:
@@ -417,7 +424,7 @@ def brute_force_gpg_bytes(original_bytes: np.ndarray, expected_checksum: int, ma
                 shortened[write_index] = original_bytes[read_index]
                 write_index += 1
             if compute_cr24_checksum(shortened) == expected_checksum:
-                return True, shortened
+                return True, shortened, True
             if not advance_combination(positions, byte_count):
                 break
 
@@ -429,9 +436,9 @@ def brute_force_gpg_bytes(original_bytes: np.ndarray, expected_checksum: int, ma
         for inserted_value in range(256):
             lengthened[insert_index] = inserted_value
             if compute_cr24_checksum(lengthened) == expected_checksum:
-                return True, lengthened
+                return True, lengthened, True
 
-    return False, original_bytes
+    return False, original_bytes, False
 
 #endregion
 
@@ -564,7 +571,7 @@ def main() -> None:
     start_time = time.time()
     if args.mode == 'extract':
         print(f"bit-correct: {args.bit_correct}, statuses-detection: {args.statuses_detection}, gpg-block: {args.gpg_block} gpg-brute-bytes: {args.gpg_brute_bytes}")
-        
+        files: list[Path] = []
         # check that the file type matchs the given arguments
         if args.dir is not None:
             if not args.dir.is_dir():
@@ -592,7 +599,10 @@ def main() -> None:
             terminal_size = shutil.get_terminal_size()
             file_devider = f"{file_index}, {file.name}"
             print(file_devider, '-'*(terminal_size.columns-len(file_devider)-1))
-
+            logger.info(f'file size: {file.stat().st_size}')
+            if file.stat().st_size == 0:
+                print('File empty')
+                continue
             transmission = decode_message(
                 file.read_bytes(),
                 bit_correct=args.bit_correct,
@@ -605,21 +615,24 @@ def main() -> None:
             message = transmission['message']
             statuses = transmission['statuses']
             footer = transmission['footer']
-            applied_corrections = transmission['applied_corrections']
-            print(f'applied corrections: {applied_corrections}')
+            applied_bit_corrections = transmission['applied_bit_corrections']
+            applied_gpg_corrections = transmission['applied_gpg_corrections']
 
+            print(f'Applied bit corrections: {applied_bit_corrections}')
+            print(f"Applied gpg correction: {applied_gpg_corrections}")
+            print('Message:')
             print("`````")
             if decode_type == 0:
                 print(message)
             elif decode_type == 1:
                 args.raw.write_bytes(message)
-                print(f'wrote to {str(args.raw)}')
+                print(f'Wrote to {str(args.raw)}')
             print("`````")
-
+            print('Statuses:')
             print("````")
             print(statuses)
             print("````")
-
+            print('Footer:')
             print("```")
             print(footer)
             print("```")

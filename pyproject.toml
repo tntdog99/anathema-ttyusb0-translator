@@ -1,6 +1,6 @@
 [project]
 name = "anathema-ttyusb0-translator"
-version = "0.1.7"
+version = "0.1.9"
 description = "a script to help decode ttyUSB0 [M.A.S.L] messages"
 readme = "README.md"
 authors = [
