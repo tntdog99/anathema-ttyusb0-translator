@@ -61,6 +61,7 @@ BEL
 ### control codes:  
 each control code is 8 bits long  
 normally so far they follow the standard ASCII control codes
+statuses sit betweeb ETX and EOT, they are normal ASCII control codes
 
 naming format: \<BYTE\>, \<NAME\>, \<MEANING\>   
 
@@ -69,7 +70,7 @@ naming format: \<BYTE\>, \<NAME\>, \<MEANING\>
 0x03: ETX, end of message  
 0x04: EOT, end of transmission  
 
-#### status:  
+#### statuses:  
 0x00: NUL  
 0x05: ENQ  
 0x06: ACK  
@@ -86,7 +87,7 @@ each letter starts with a single leading "1" bit
 strip that bit to get the letter in ASCII  
 
 ## message framing:  
-  
+
 #### format:  
 
 \<STX\>  
@@ -94,3 +95,4 @@ strip that bit to get the letter in ASCII
 \<ETX\>  
 \<STATUSES\>  
 \<EOT\>  
+
