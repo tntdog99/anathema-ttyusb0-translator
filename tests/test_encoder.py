@@ -1,10 +1,14 @@
-from anathema_ttyusb0_translator import encode_message
+from anathema_ttyusb0_translator.translator import encode_message
 
-# main message: hello_world!
-# status: ENQ, BEL
 
 test_messages = [
-    (bytes.fromhex('02b4596d96cb7d7eef6fb95b2c921003050704'), ('hello_world!', [5,7]))
+    (
+        bytes.fromhex('02b4596d96cb7d7eef6fb95b2c921003050704'),
+        (
+            'hello_world!',
+            [5,7]
+        )
+    )
 ]
 
 
@@ -13,4 +17,4 @@ def test_message_encoder():
         expected = message[0]
         encoder_settings = message[1]
         test_encode_bytes = encode_message(encoder_settings[0], encoder_settings[1])
-        assert  expected == test_encode_bytes
+        assert expected == test_encode_bytes
