@@ -96,3 +96,15 @@ strip that bit to get the letter in ASCII
 \<STATUSES\>  
 \<EOT\>  
 
+
+## Licenses
+
+Copyright Contributors to the anathema-ttyusb0-translator project.
+
+
+the code is licensed under LGPL-2.1-or-later WITH WxWindows-exception-3.1.
+this README is licensed under CC-BY-4.0. full texts are in the LICENSES/ folder.
+all other files are licensed under CC0-1.0
+
+versions up to and including 0.2.2 were released under GPL-3.0. copies of those
+versions remain under that license. 0.3.0 and later are LGPL.
